@@ -106,6 +106,35 @@ worst kind of agreement.
 Both axes sample at **pixel centres**. Off by half a map pixel is three and a
 half pixels of disparity in the wrong place at 4K.
 
+## Reshaping depth before it becomes disparity
+
+VITURE's own player reshapes the depth at this point — `sigmoidCoef` in its
+Metal library — and this offers the same, as a **table of 256 entries** rather
+than a formula. A table because the GPU implementation is checked against this
+one byte for byte, and both can index the same bytes; a formula would have to
+be reimplemented there in floating point and would agree almost always, which
+is the worst kind of agreement.
+
+```go
+opts := depth.Options{MaxShift: 24, Curve: depth.Sigmoid(4)}
+fmt.Println(depth.DisparityOf(opts.Curve, opts)) // what it costs, in pixels
+```
+
+`Sigmoid` flattens both ends of the range and expands the middle. Read that
+precisely, because the obvious reading is wrong: what is compressed is the
+**range** at each end, not the disparity there. A near object ends up with
+slightly **more** disparity, while the differences *among* near objects shrink.
+The background flattens into one plane, the foreground into another, and the
+middle — where the subject usually is — gets the relief they gave up. It is not
+a comfort control.
+
+**And at a comfortable disparity it barely matters.** Twenty-four pixels
+between the eyes is twelve each way, so the whole depth range has thirteen
+distinct shifts to spend, and quantisation swamps any reshaping of it: measured
+at the default, a sigmoid of strength 4 changes the disparity of fewer than half
+the depth values, by one pixel. It earns its keep only when the disparity is
+large. `DisparityOf` is there so that can be checked rather than assumed.
+
 ## `Cues` is three honest guesses
 
 Where there is no model, depth is estimated from the picture alone: what is
