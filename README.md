@@ -86,6 +86,26 @@ Softening the step spreads the jump over several frames instead:
 Radius 2 is the trade worth making: four fifths of the boiling gone for five
 per cent of the relief. Below half a pixel there is nothing left to see.
 
+## The map is interpolated, not snapped
+
+A depth map is routinely a different size from the picture — a network has its
+own input size and does not care what it was given. At 4K one map pixel covers
+four to seven of the image's.
+
+Taking the **nearest** map pixel manufactures a depth step every time the
+picture crosses a map pixel boundary. Measured on one photograph at 1080p:
+**2099 depth steps where the map itself holds 28** — on a regular grid,
+answering to nothing in the picture, and reading as a staircase across every
+smooth surface. At 4K it was 3694 against 20.
+
+The arithmetic is **integer throughout**, and that is not an optimisation: the
+same synthesis exists as GPU kernels, and the two are checked against each
+other byte for byte. Floating point would agree almost always, which is the
+worst kind of agreement.
+
+Both axes sample at **pixel centres**. Off by half a map pixel is three and a
+half pixels of disparity in the wrong place at 4K.
+
 ## `Cues` is three honest guesses
 
 Where there is no model, depth is estimated from the picture alone: what is
