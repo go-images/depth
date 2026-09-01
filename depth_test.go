@@ -126,17 +126,23 @@ func TestNoHoleIsLeftBehind(t *testing.T) {
 
 func TestAHoleAtTheVeryStartOfARowIsFilledFromTheRight(t *testing.T) {
 	// The left-to-right pass has nothing to copy from until it meets its first
-	// filled pixel, so a hole at x=0 is only covered by the second pass. With
-	// one pass there is a transparent column down the edge of every frame.
-	img := rgba(4, 1)
-	for x := 2; x < 4; x++ {
-		p := x * 4
-		img.Pix[p], img.Pix[p+3] = 0x77, 255
+	// filled column, so a hole at x=0 is only covered by the second pass. With
+	// one pass there is a black column down the edge of every frame.
+	from := []int32{-1, -1, 7, 9, -1, -1}
+	closeHoles(from)
+	want := []int32{7, 7, 7, 9, 9, 9}
+	for i := range want {
+		if from[i] != want[i] {
+			t.Fatalf("closeHoles gave %v, want %v", from, want)
+		}
 	}
-	fillHoles(img)
-	for x := 0; x < 4; x++ {
-		if img.Pix[x*4+3] == 0 || img.Pix[x*4] != 0x77 {
-			t.Fatalf("x=%d is %d alpha %d, want 0x77 opaque", x, img.Pix[x*4], img.Pix[x*4+3])
+
+	// A row nothing reached at all stays empty rather than inventing a column.
+	none := []int32{-1, -1, -1}
+	closeHoles(none)
+	for i, v := range none {
+		if v != -1 {
+			t.Fatalf("an empty row filled itself at %d with %d", i, v)
 		}
 	}
 }
@@ -247,5 +253,52 @@ func TestTheLuminanceCuePrefersTheMiddleToEitherExtreme(t *testing.T) {
 	grey, white, black := depthOf(128), depthOf(255), depthOf(0)
 	if grey <= white || grey <= black {
 		t.Fatalf("mid-grey %d is not nearer than white %d or black %d", grey, white, black)
+	}
+}
+
+func TestViewsIntoReusesPicturesAndSaysWhyWhenItCannot(t *testing.T) {
+	const w, h = 32, 8
+	src := stripes(w, h)
+	left, right := rgba(w, h), rgba(w, h)
+	if err := ViewsInto(left, right, src, flat(w, h, 255), Options{MaxShift: 24}); err != nil {
+		t.Fatal(err)
+	}
+	// The same pair again, over the top of the last answer. Reuse is the whole
+	// point of this entry point, and a synthesis that relied on its
+	// destination starting empty would leave the previous frame showing
+	// through wherever this one has a hole.
+	if err := ViewsInto(left, right, src, flat(w, h, 0), Options{MaxShift: 24}); err != nil {
+		t.Fatal(err)
+	}
+	for x := 0; x < w; x++ {
+		if got := left.Pix[x*4]; got != byte(x) {
+			t.Fatalf("after reuse, left at x=%d is %d, want %d", x, got, x)
+		}
+	}
+
+	small := rgba(w/2, h)
+	for _, tc := range []struct {
+		name             string
+		left, right, src *image.RGBA
+		m                Map
+	}{
+		{"no left", nil, right, src, flat(w, h, 128)},
+		{"no right", left, nil, src, flat(w, h, 128)},
+		{"no source", left, right, nil, flat(w, h, 128)},
+		{"a source of nothing", left, right, rgba(0, 0), flat(w, h, 128)},
+		{"a map that does not hang together", left, right, src, Map{Width: w, Height: h, At: make([]byte, 3)}},
+		{"a left eye of the wrong size", small, right, src, flat(w, h, 128)},
+		{"a right eye of the wrong size", left, small, src, flat(w, h, 128)},
+		{"writing over the source", src, right, src, flat(w, h, 128)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ViewsInto(tc.left, tc.right, tc.src, tc.m, Options{})
+			if err == nil {
+				t.Fatal("it was accepted")
+			}
+			if err.Error() == "" {
+				t.Error("the refusal says nothing")
+			}
+		})
 	}
 }

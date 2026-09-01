@@ -17,13 +17,19 @@
 //
 // # Three things here were measured rather than assumed
 //
-// The synthesis GATHERS rather than scatters. The obvious way to move pixels
-// sideways is to paint them, far ones first, so near ones land on top — but
-// that needs a global sort of every pixel by depth and it forbids two threads
-// from sharing a row. Asking instead what could have reached each OUTPUT pixel
-// and keeping the nearest gives the same answer, with no sort and no shared
-// write. On sixteen cores that was 2.2 times faster at 4K, and the two agreed
-// on 0 bytes out of 66 355 200.
+// The synthesis is ONE PASS OVER THE SOURCE columns, per row. The textbook way
+// to move pixels sideways is to paint them all, far ones first, so near ones
+// land on top -- but that needs a global sort of every pixel by depth. What
+// the sort avoids is two threads writing the same place, and splitting the
+// work BY ROW already prevents it: within one row each source pixel has one
+// destination in each eye, and where two collide the nearer wins.
+//
+// Asking instead what could have REACHED each output column needs no sort
+// either, which is what this package did first -- but it costs a short search
+// per pixel and samples the depth map thirteen times as often. Replacing it
+// was worth five times the speed at 4K, and the answer did not change:
+// checked against a GPU implementation of the painting rule, the two agree on
+// 0 bytes out of 86 999 040.
 //
 // Soften is not cosmetic. A step in a depth map crossing the pixel grid makes
 // an edge pixel jump five pixels of disparity between one frame and the next —

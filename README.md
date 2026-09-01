@@ -13,6 +13,13 @@ m = depth.Soften(m, 2)
 left, right := depth.Views(img, m, depth.Options{MaxShift: 24})
 ```
 
+A player has the same two eyes every frame, and at 4K a fresh pair is
+sixty-six megabytes. `ViewsInto` writes into pictures that already exist:
+
+```go
+err := depth.ViewsInto(left, right, img, m, depth.Options{MaxShift: 24})
+```
+
 `Views` takes any depth map, so a better one can be substituted without
 touching anything else. On a Mac that is a real depth network on the Neural
 Engine ([go-macos/coreml](https://github.com/go-macos/coreml)) and the same
@@ -20,20 +27,40 @@ synthesis as compute kernels ([go-macos/metal](https://github.com/go-macos/metal
 This package is the answer where neither exists, and the definition of what
 they must compute.
 
-## The synthesis gathers, it does not scatter
+## One pass over the source, per row
 
-The obvious way to move pixels sideways is to paint them — far ones first, so
-near ones land on top, which is the whole of the occlusion handling. But that
-needs a global sort of every pixel by depth, and it forbids two threads from
-sharing a row.
+The textbook way to move pixels sideways is to paint them all — far ones
+first, so near ones land on top, which is the whole of the occlusion handling.
+That needs a global sort of every pixel by depth.
 
-Turned around, each **output** pixel asks which source pixels could have
-reached it and keeps the nearest. Last-writer-wins and highest-depth-wins are
-the same rule, so it is the same answer — with no sort and no shared write.
+What the sort is avoiding is two threads writing the same place. Splitting the
+work **by row** already prevents that, and then each source pixel simply has
+one destination in each eye, with the nearer winning where two collide.
 
-At 4K on sixteen cores that was 2.2× faster, and checked against a GPU
-implementation of the painting version it agreed on **0 bytes out of
-66 355 200**.
+Asking instead what could have **reached** each output column needs no sort
+either, and that is what this package did first — but it costs a short search
+per pixel and samples the depth map thirteen times as often. Replacing it was
+worth **five times the speed** at 4K.
+
+The answer did not change. Checked against a GPU implementation of the
+painting rule, the two agree on **0 bytes out of 86 999 040**.
+
+## Speed
+
+Per frame, whole chain: depth from cues, softened, and both eyes synthesised.
+
+| | 960×540 | 1920×1080 | 3840×2160 |
+|---|---|---|---|
+| M4 Max, 16 cores | 0.6 ms | 1.9 ms | 6.3 ms |
+| Snapdragon 8+ Gen 1, 6 cores | 5.0 ms | 17.2 ms | 46.9 ms |
+
+A telephone converts 1080p video to 3D **faster than it plays**, in portable
+Go with no hardware acceleration of any kind — which matters, because there is
+none to be had there: reaching Vulkan or the neural unit from Go needs cgo and
+the Android NDK.
+
+Those numbers are `ViewsInto`. Allocating a fresh pair per frame costs about
+twice as much on the telephone at 540p, and nothing at all on the Mac.
 
 ## `Soften` is not cosmetic
 
