@@ -101,7 +101,7 @@ func ViewsInto(left, right, src *image.RGBA, m Map, opts Options) error {
 			// times as often.
 			for x := 0; x < w; x++ {
 				d := m.sample(x, y, w, h)
-				k := d * maxShift / 255 / 2
+				k := shiftFor(opts.Curve, d, maxShift)
 				if t := x + k; t < w && int16(d) >= ld[t] {
 					ld[t], lf[t] = int16(d), int32(x)
 				}

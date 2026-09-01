@@ -71,6 +71,17 @@ type Options struct {
 	// Generating only the second eye and leaving the first alone is cheaper
 	// and wrong: the whole film then feels as though it has slid sideways.
 	MaxShift int
+
+	// Curve reshapes depth before it becomes disparity: 256 entries, indexed by
+	// the depth byte. Nil means none, which is a straight proportional shift.
+	//
+	// Build one with Sigmoid, and see what it does with DisparityOf. A table
+	// rather than a formula because the GPU implementation of this synthesis is
+	// checked against it byte for byte, and both can index the same table.
+	//
+	// A slice of any other length is ignored rather than refused: this is on
+	// the path of every frame, and a per-frame error is an error nobody checks.
+	Curve []byte
 }
 
 func (o Options) maxShift() int {
