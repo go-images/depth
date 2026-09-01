@@ -302,3 +302,51 @@ func TestViewsIntoReusesPicturesAndSaysWhyWhenItCannot(t *testing.T) {
 		})
 	}
 }
+
+func TestSampleAtInterpolatesRatherThanSnapping(t *testing.T) {
+	// A two-pixel map stretched across eight picture pixels. Taking the
+	// nearest map pixel gives four 10s then four 200s -- one step, on a grid
+	// the picture knows nothing about. Interpolating gives a ramp.
+	m := Map{Width: 2, Height: 1, At: []byte{10, 200}}
+	var got []int
+	for x := 0; x < 8; x++ {
+		got = append(got, m.SampleAt(x, 0, 8, 1))
+	}
+	steps := 0
+	for i := 1; i < len(got); i++ {
+		if d := got[i] - got[i-1]; d > 60 {
+			steps++
+		}
+		if got[i] < got[i-1] {
+			t.Fatalf("the ramp goes backwards at %d: %v", i, got)
+		}
+	}
+	if steps != 0 {
+		t.Fatalf("%d abrupt step(s) in %v; interpolation should have none", steps, got)
+	}
+	if got[0] != 10 || got[7] != 200 {
+		t.Fatalf("the ends moved: %v", got)
+	}
+
+	// Both samples are taken at PIXEL CENTRES. If they were not, the whole
+	// picture shifts by half a map pixel -- three and a half pixels of
+	// disparity in the wrong place at 4K.
+	if mid := m.SampleAt(3, 0, 8, 1); mid < 80 || mid > 130 {
+		t.Errorf("the middle of the ramp is %d, which is not near the middle", mid)
+	}
+
+	// And it must answer safely for a map or a size it cannot use.
+	if v := (Map{}).SampleAt(0, 0, 4, 4); v != 0 {
+		t.Errorf("an invalid map sampled %d", v)
+	}
+	if v := m.SampleAt(0, 0, 0, 0); v != 0 {
+		t.Errorf("a picture of no size sampled %d", v)
+	}
+	// Out of range coordinates are pinned rather than read out of bounds.
+	if m.SampleAt(-5, -5, 8, 1) != m.SampleAt(0, 0, 8, 1) {
+		t.Error("a negative coordinate was not pinned to the edge")
+	}
+	if m.SampleAt(99, 99, 8, 1) != m.SampleAt(7, 0, 8, 1) {
+		t.Error("a coordinate past the end was not pinned to the edge")
+	}
+}

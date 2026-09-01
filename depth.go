@@ -80,13 +80,59 @@ func (o Options) maxShift() int {
 	return o.MaxShift
 }
 
-// sample reads the map at a picture coordinate. The map is routinely a
-// different SIZE from the picture — a depth network has its own input size and
-// does not care what it was given — so this scales rather than assuming.
+// sample reads the map at a picture coordinate, interpolating between the four
+// map pixels around it.
+//
+// The map is routinely a different SIZE from the picture — a depth network has
+// its own input size and does not care what it was given — so this scales
+// rather than assuming. Taking the NEAREST map pixel instead is what a first
+// version did, and it manufactures a depth step every time the picture crosses
+// a map pixel boundary: measured on one photograph at 1080p, 2099 steps where
+// the map itself contains 28. They sit on a regular grid, they answer to
+// nothing in the picture, and they read as a staircase across every smooth
+// surface.
+//
+// The arithmetic is INTEGER throughout, and that is not an optimisation: the
+// same synthesis is implemented on a GPU, and the two are checked against each
+// other byte for byte. Floating point would agree almost always, which is the
+// worst kind of agreement.
 func (m Map) sample(x, y, w, h int) int {
-	mx := min(x*m.Width/w, m.Width-1)
-	my := min(y*m.Height/h, m.Height-1)
-	return int(m.At[my*m.Width+mx])
+	hi, ti, di := lerp(x, w, m.Width)
+	hj, tj, dj := lerp(y, h, m.Height)
+	lo_i, lo_j := max(hi, 0), max(hj, 0)
+	hi_i, hi_j := min(hi+1, m.Width-1), min(hj+1, m.Height-1)
+	at := func(a, b int) int { return int(m.At[b*m.Width+a]) }
+	top := at(lo_i, lo_j)*(di-ti) + at(hi_i, lo_j)*ti
+	bot := at(lo_i, hi_j)*(di-ti) + at(hi_i, hi_j)*ti
+	return (top*(dj-tj) + bot*tj + di*dj/2) / (di * dj)
+}
+
+// lerp places picture coordinate v inside a map of size to, and returns the
+// lower map index with the fraction to the next one as an exact ratio.
+//
+// Both samples are taken at PIXEL CENTRES — the halves below — or the whole
+// image shifts by half a map pixel, which at 4K is three and a half pixels of
+// disparity in the wrong place.
+func lerp(v, from, to int) (idx, num, den int) {
+	den = 2 * from
+	p := (2*v+1)*to - from // = den * (centre in map coordinates - 0.5)
+	idx = p / den
+	if p < 0 && p%den != 0 {
+		idx--
+	}
+	return idx, p - idx*den, den
 }
 
 func rgba(w, h int) *image.RGBA { return image.NewRGBA(image.Rect(0, 0, w, h)) }
+
+// SampleAt exposes the map's own interpolation, at a picture coordinate in a
+// picture of the given size.
+//
+// It exists because the alternative — a measurement tool reimplementing the
+// sampling it means to measure — measures the reimplementation.
+func (m Map) SampleAt(x, y, w, h int) int {
+	if !m.Valid() || w < 1 || h < 1 {
+		return 0
+	}
+	return m.sample(min(max(x, 0), w-1), min(max(y, 0), h-1), w, h)
+}
